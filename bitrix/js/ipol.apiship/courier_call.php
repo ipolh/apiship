@@ -1,7 +1,17 @@
-<?/*if isset($smarty.get.gear_send){?>
-	<div class="alert alert-success">Спасибо, ваша заявка принята, с вами свяжется менеджер GearLogistics</div>
-<?}else{*/
+<?php
+require_once($_SERVER["DOCUMENT_ROOT"] . "/bitrix/modules/main/include/prolog_admin_before.php");
+require($_SERVER["DOCUMENT_ROOT"] . BX_ROOT . "/modules/main/include/prolog_admin_after.php");
 
+$APPLICATION->SetTitle('Заявки на вызов курьера');
+
+CModule::IncludeModule('ipol.apiship');
+
+
+if($isAjax = ($_REQUEST['bxsender']=='core_window_cdialog' || $_REQUEST['is_ajax'])) {
+	$APPLICATION->RestartBuffer();
+}
+
+CModule::IncludeModule('sale');
 $dbNotSendOrders = $DB->Query("select * from ipol_apiship where STATUS LIKE 'uploaded'");
 $arOrderIDS = [];
 
@@ -9,6 +19,8 @@ while ($arOrder = $dbNotSendOrders->Fetch()) {
 	$arOrder['PARAMS'] = unserialize($arOrder['PARAMS']);
 	$arOrderIDS[$arOrder['PARAMS']['pvzInfo']['providerKey']][$arOrder['ORDER_ID']] = $arOrder['apiship_ID'];
 }
+
+$arSendProviders = array_keys($arOrderIDS);
 
 $arParameters = array(
 	'providerKey' => array(
@@ -81,37 +93,37 @@ $arParameters = array(
 	'street'      => array(
 		'NAME'    => 'Улица',
 		'SAVE'    => true,
-		'DEFAULT' => 'Березовая аллея'
+		'DEFAULT' => ''
 	),
 	'house'       => array(
 		'NAME'    => 'Дом',
 		'SAVE'    => true,
-		'DEFAULT' => '5а'
+		'DEFAULT' => ''
 	),
 	'block'       => array(
 		'NAME'    => 'Строение',
 		'SAVE'    => true,
-		'DEFAULT' => 'с1-3'
+		'DEFAULT' => ''
 	),
 	'companyName' => array(
 		'NAME'    => 'Название компании',
 		'SAVE'    => true,
-		'DEFAULT' => 'ИП Лазуткин Андрей Валерьевич'
+		'DEFAULT' => ''
 	),
 	'contactName' => array(
 		'NAME'    => 'ФИО',
 		'SAVE'    => true,
-		'DEFAULT' => 'Лазуткин Андрей'
+		'DEFAULT' => ''
 	),
 	'phone'       => array(
 		'NAME'    => 'Контактный телефон',
 		'SAVE'    => true,
-		'DEFAULT' => '+7 (916) 597-85-40'
+		'DEFAULT' => ''
 	),
 	'email'       => array(
 		'NAME'    => 'Емеил',
 		'SAVE'    => true,
-		'DEFAULT' => 'info@audio-drive.ru'
+		'DEFAULT' => ''
 	)
 );
 $arMessages = [];
@@ -130,13 +142,13 @@ echo '<script>window.orders=' . json_encode($arJsonOrders) . ';</script>';
 CJSCore::Init('jquery');
 ?>
 
-    <script>
+	<script>
 		$(document).ready(function () {
 			$(document).on('click', 'input.input-providerKey', function (e) {
 				$('input.input-orderIds').val(window.orders[$(this).attr('value')]);
 			});
 		});
-    </script>
+	</script>
 
 <?
 
@@ -190,143 +202,65 @@ foreach ($arParameters as $strParamCode => $arParamOptions) {
 
 ?>
 
-<style>
-.has-error{
-	border: 1px solid red !important;
-}
-</style>
-
-<div id = "IPOLapiship_courierCall" style = "display: none;">
-
-<div>
-    <p><?=GetMessage("IPOLapiship_JSC_SOD_HEADING")?></p>
-
-    <h3 style="color:red;"><?= implode('<br/>', $arMessages) ?></h3>
-    <form method="post" enctype="multipart/form-data">
-        <table style="width: 100%;">
+	<form id='courier_call_form' method="post" enctype="multipart/form-data">
+		<h3 style="color:red;"><?= implode('<br/>', $arMessages) ?></h3>
+		<table style="width: 100%;">
 			<?
 			foreach ($arParameters as $strParamCode => $arParamOptions) { ?>
-                <tr>
-                <td width="20%"><label><?= $arParamOptions['NAME'] ?></label></td>
-                <td>
+				<tr>
+				<td width="20%"><label><?= $arParamOptions['NAME'] ?></label></td>
+				<td>
 					<? if ($arParamOptions['VARIANTS']) {
 						?>
 						<? foreach ($arParamOptions['VARIANTS'] as $providerCode) { ?>
-                            <label><input type="radio" class="input-<?= $strParamCode ?>"
-                                          name="SEND[<?= $strParamCode ?>]"
-                                          value="<?= $providerCode ?>"
+							<label><input type="radio" class="input-<?= $strParamCode ?>"
+							              name="SEND[<?= $strParamCode ?>]"
+							              value="<?= $providerCode ?>"
 							              <? if ($providerCode == $arParamOptions['VALUE']) { ?>checked<? } ?>/><?= $providerCode ?>
-                            </label>
-                            <br/>
+							</label>
+							<br/>
 							<?
 						}
 					} else {
 						?>
-                        <input class="input-<?= $strParamCode ?>" style="width:80%;"
-                               type="<?= $arParamOptions['INPUT_TYPE'] ?: 'text' ?>"
-                               name="SEND[<?= $strParamCode ?>]"
-                               value="<?= $arParamOptions['VALUE'] ?: $arParamOptions['DEFAULT'] ?>"/>
+						<input class="input-<?= $strParamCode ?>" style="width:80%;"
+						       type="<?= $arParamOptions['INPUT_TYPE'] ?: 'text' ?>"
+						       name="SEND[<?= $strParamCode ?>]"
+						       value="<?= $arParamOptions['VALUE'] ?: $arParamOptions['DEFAULT'] ?>"/>
 						<?
 					}
 					?></td></tr><?
 			}
 			?>
-        </table>
-        <input type="submit" value="Отправить"/>
-    </form>
-
-</div>
-</div>
-
-
+		</table>
+		<input type="button" onclick="sendCourierCallReq();" value="Отправить"/>
+	</form>
 
 <script>
-IPOLapiship_Sender.sendCourierRequest = function(){
-		$('#gear_form .has-error').removeClass('has-error');
+	sendCourierCallReq = function () {
+		var wait = BX.showWait('courier_call_form');
 
-		var errors = 0;
-		$('#gear_form input[required]').each(function(){ //console.log($(this));
-			if ($(this).val().length == 0) {
-				console.log($(this));
-				$(this).addClass('has-error');
-				if (errors == 0)
-					$(this).focus();
-				errors++;
+		BX.ajax(
+			{
+				url: "/bitrix/js/<?=apishipdriver::$MODULE_ID?>/courier_call.php?is_ajax=Y",
+				method: 'POST',
+				data: BX.ajax.prepareData(BX.ajax.prepareForm(document.querySelector('#courier_call_form')).data),
+				dataType: 'html',
+				processData: true,
+				onsuccess: function (result) {
+					console.log('result', result);
+					BX.html(BX('courier_call_form'),result);
+					BX.closeWait('courier_call_form', wait);
+				}
 			}
-		});
-		
-		if ($('input[name="data[gear_offer_accept]"]:checked').length == 0) {
-			$('input[name="data[gear_offer_accept]"]').parents('.checkbox').addClass('has-error');
-			errors++;
-		}
-		
-		if ($('input[name="data[gear_provider][]"]:checked').length == 0) {
-			$('input[name="data[gear_provider][]"]:first').parents('.form-group').addClass('has-error');
-			errors++;
-		}
-
-		// console.log(errors);
-		// return;
-		
-		if (errors == 0)
-		{
-			$.ajax({
-				url: "/bitrix/js/<?=apishipdriver::$MODULE_ID?>/ajax.php",
-				data: $('#gear_form').serialize(),
-				type:"POST",
-				dataType: "json",
-				error: function(XMLHttpRequest, textStatus){
-					console.log(XMLHttpRequest.responseText);
-					console.log(textStatus);
-				},
-				success: function(data)
-				{
-					console.log(data);
-					if (data.success)
-					{
-						if (confirm("<?=GetMessage("IPOLapiship_JSC_SOD_COURIER_REQ_SUCCESS")?>"))
-							IPOLapiship_Sender.courierForm.Close();
-					}
-					else
-					{
-						var errStr = "";
-						console.log(data.data);
-						for (var i in data.data)
-							errStr += data.data[i]+"\n";
-						console.log(errStr);
-						confirm(errStr);
-					}
-				},
-			});
-		}
-			// $('#gear_form').trigger('submit');
-};
-
-
-IPOLapiship_Sender.courierForm = false;
-IPOLapiship_Sender.showCourierForm = function(){
-	if (!IPOLapiship_Sender.courierForm)
-	{
-		
-		var html = $('#IPOLapiship_courierCall').html();
-		$('#IPOLapiship_courierCall').remove();
-		
-		IPOLapiship_Sender.courierForm = new BX.CDialog({
-			title: "<?=GetMessage('IPOLapiship_JSC_SOD_COURTITLE')?>",
-			content: html,
-			icon: 'head-block',
-			resizable: true,
-			draggable: true,
-			height: '500',
-			width: '475',
-			buttons: [
-				// отправить  заявку на курьера
-				'<input type=\"button\" value=\"<?=GetMessage('IPOLapiship_JSC_SOD_COURCALL')?>\"  onclick=\"IPOLapiship_Sender.sendCourierRequest();\"/>',
-			]
-		});
+		);
 	}
-	
-	IPOLapiship_Sender.courierForm.Show();
-};
 </script>
-<?//}?>
+
+<?
+
+if($isAjax) {
+	die();
+}
+require($_SERVER["DOCUMENT_ROOT"] . "/bitrix/modules/main/include/epilog_admin.php");
+?>
